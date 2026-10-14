@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LapTimer διάγνωση</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background: #fff; color: #111; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .muted { color: #666; font-size: 13px; }
+  button { display: block; width: 100%; font-size: 17px; font-weight: 700; padding: 14px; margin: 8px 0;
+           border-radius: 12px; border: 1px solid #ccc; background: #f2f2f2; color: #111; touch-action: manipulation; }
+  button.bt { background: #ffc400; border-color: #e0ac00; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #f6f6f6; border: 1px solid #ddd; border-radius: 10px;
+        padding: 10px; font-size: 12px; }
+  #log { min-height: 80px; }
+</style>
+</head>
+<body>
+<h1>LapTimer — διάγνωση</h1>
+<div class="muted">Έκδοση διάγνωσης 1. Πάτα κάθε κουμπί από μία φορά και στείλε screenshot.</div>
+
+<button id="bA" onclick="hit('A: inline onclick')">A — δοκιμή κουμπιού</button>
+<button id="bB">B — δοκιμή κουμπιού</button>
+<button id="bC">C — δοκιμή κουμπιού</button>
+<button id="bD">D — δοκιμή αφής</button>
+<button class="bt" onclick="scan(false)">Αναζήτηση LapTimer</button>
+<button class="bt" onclick="scan(true)">Αναζήτηση όλων των συσκευών</button>
+
+<pre id="log">Αν εδώ δεν εμφανιστεί τίποτα μετά από πάτημα, το JavaScript δεν τρέχει.</pre>
+<pre id="info">…</pre>
+
+<script>
+// Μόνο απλό, παλιό JavaScript (ES5), για να τρέχει σε κάθε browser.
+var LT_SVC = 'a3f10001-5b2e-4c8a-9d71-2f6e8c0b4a10';
+var lt_lines = [];
+
+function log(msg) {
+  var t = new Date();
+  lt_lines.unshift(('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2) + '  ' + msg);
+  document.getElementById('log').textContent = lt_lines.slice(0, 30).join('\n');
+}
+function hit(which) { log('OK πάτημα — ' + which); }
+
+window.onerror = function (msg, src, line) { log('ΣΦΑΛΜΑ JS: ' + msg + ' (γραμμή ' + line + ')'); };
+
+function scan(all) {
+  log('Αναζήτηση: ξεκινά (' + (all ? 'όλες' : 'LapTimer') + ')');
+  try {
+    if (!navigator.bluetooth) { log('ΣΦΑΛΜΑ: δεν υπάρχει navigator.bluetooth σε αυτόν τον browser'); return; }
+    var opts = all
+      ? { acceptAllDevices: true, optionalServices: [LT_SVC] }
+      : { filters: [{ services: [LT_SVC] }, { namePrefix: 'LapTimer' }], optionalServices: [LT_SVC] };
+    var p = navigator.bluetooth.requestDevice(opts);
+    if (!p || typeof p.then !== 'function') { log('requestDevice δεν επέστρεψε Promise: ' + p); return; }
+    p.then(function (dev) {
+      log('Επιλέχθηκε: ' + (dev && dev.name) + ' (id ' + (dev && dev.id) + ')');
+      if (!dev || !dev.gatt) { log('Η συσκευή δεν έχει gatt'); return; }
+      log('Σύνδεση GATT…');
+      return dev.gatt.connect().then(function (server) {
+        log('GATT συνδέθηκε');
+        return server.getPrimaryService(LT_SVC);
+      }).then(function (svc) {
+        log('Βρέθηκε η υπηρεσία LapTimer');
+        return svc.getCharacteristic('a3f10002-5b2e-4c8a-9d71-2f6e8c0b4a10');
+      }).then(function (ch) {
+        return ch.readValue();
+      }).then(function (dv) {
+        log('Διαβάστηκε πακέτο live: ' + dv.byteLength + ' bytes — ΟΛΑ ΚΑΛΑ');
+        dev.gatt.disconnect();
+      });
+    }).catch(function (e) {
+      log('ΣΦΑΛΜΑ αναζήτησης/σύνδεσης: ' + (e && e.name) + ' — ' + (e && e.message ? e.message : e));
+    });
+  } catch (e) {
+    log('ΣΦΑΛΜΑ (εξαίρεση): ' + (e && e.name) + ' — ' + (e && e.message ? e.message : e));
+  }
+}
+
+try { document.getElementById('bB').onclick = function () { hit('B: onclick property'); }; } catch (e) { log('B setup: ' + e); }
+try { document.getElementById('bC').addEventListener('click', function () { hit('C: addEventListener'); }); } catch (e) { log('C setup: ' + e); }
+try { document.getElementById('bD').addEventListener('touchend', function () { hit('D: touchend'); }); } catch (e) { log('D setup: ' + e); }
+
+(function () {
+  var info = [];
+  try {
+    info.push('Browser: ' + navigator.userAgent);
+    info.push('https: ' + location.protocol + ' · secure: ' + window.isSecureContext);
+    var bt = navigator.bluetooth;
+    info.push('navigator.bluetooth: ' + (bt ? typeof bt : 'όχι'));
+    if (bt) {
+      var keys = [];
+      for (var k in bt) keys.push(k);
+      info.push('bluetooth κλειδιά: ' + (keys.join(', ') || '(κανένα)'));
+      info.push('requestDevice: ' + typeof bt.requestDevice);
+    }
+    var ael = String(EventTarget.prototype.addEventListener);
+    info.push('addEventListener: ' + (ael.indexOf('[native code]') >= 0 ? 'αρχικό' : 'ΠΕΙΡΑΓΜΕΝΟ από τον browser'));
+  } catch (e) {
+    info.push('σφάλμα πληροφοριών: ' + e);
+  }
+  document.getElementById('info').textContent = info.join('\n');
+  log('Το JavaScript τρέχει');
+})();
+</script>
+</body>
+</html>
